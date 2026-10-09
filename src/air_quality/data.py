@@ -19,8 +19,8 @@ def load_datasets(data_dir: Path = DEFAULT_DATA_DIR) -> tuple[pd.DataFrame, pd.D
     """
     # TODO: read train.csv and test.csv from data_dir with pd.read_csv, and
     # return them as a (train_df, test_df) tuple
-    train = pd.read_csv(DEFAULT_DATA_DIR / "train.csv")
-    test = pd.read_csv(DEFAULT_DATA_DIR / "test.csv")
+    train = pd.read_csv(data_dir / "train.csv")
+    test = pd.read_csv(data_dir / "test.csv")
     return train,test
 
 
