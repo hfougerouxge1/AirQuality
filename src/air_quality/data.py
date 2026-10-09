@@ -19,6 +19,9 @@ def load_datasets(data_dir: Path = DEFAULT_DATA_DIR) -> tuple[pd.DataFrame, pd.D
     """
     # TODO: read train.csv and test.csv from data_dir with pd.read_csv, and
     # return them as a (train_df, test_df) tuple
+    train = pd.read_csv(DEFAULT_DATA_DIR / "train.csv")
+    test = pd.read_csv(DEFAULT_DATA_DIR / "test.csv")
+    return train,test
 
 
 def restrict_to_scope(
@@ -44,6 +47,13 @@ def restrict_to_scope(
     # TODO: filter df to the given cities and columns, then, if max_rows_per_city
     # is set, draw a reproducible random sample of at most that many rows for
     # each city and concatenate the results back into a single DataFrame
+    filtered = df[df["city"].isin(cities)][columns]
+    if max_rows_per_city is None:
+        return filtered.reset_index(drop=True)
+    return pd.concat([g.sample(n=min(len(g), max_rows_per_city), 
+                      random_state=random_state) for _, g in filtered.groupby("city")],
+                      ignore_index=True)
+
 
 
 
@@ -69,6 +79,9 @@ def fill_missing_by_city(
     # TODO: sort by city_col and date_col, then for each column, group by
     # city_col and apply forward-fill followed by backward-fill within each
     # group with groupby().transform() — never fill across cities
+    df = df.sort_values([city_col, date_col]).reset_index(drop=True)
+    df[columns] = df.groupby(city_col)[columns].transform(lambda g: g.ffill().bfill())
+    return df
 
 
 # ============================================================================
