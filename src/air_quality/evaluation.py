@@ -99,7 +99,24 @@ def evaluate_group_cv(
     # each fold's training rows, evaluate it on the held-out group with
     # regression_metrics, then aggregate the mean and std of each metric
     # across folds
+    groups = df[groups_col]
+    gkf = GroupKFold(n_splits=groups.nunique())
 
+    folds = []
+    for train_idx, test_idx in gkf.split(df, groups=groups):
+        train_part = df.iloc[train_idx]
+        test_part = df.iloc[test_idx]
 
+        metrics = evaluate_manual_split(
+            clone(model), train_part, test_part, feature_cols, target_col
+        )
+        metrics["test_group"] = test_part[groups_col].iloc[0]
+        folds.append(metrics)
 
-
+    results = {"folds": folds}
+    for name in ["rmse", "mae", "r2"]:
+        values = [fold[name] for fold in folds]
+        results[f"{name}_mean"] = float(np.mean(values))
+        results[f"{name}_std"] = float(np.std(values))
+    return results
+    
