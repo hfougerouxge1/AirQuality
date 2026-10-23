@@ -16,6 +16,8 @@ def add_temporal_features(df: pd.DataFrame, date_col: str = "date") -> pd.DataFr
     """
     # TODO: parse date_col as a datetime, then add "month" and "dayofweek"
     # columns derived from it, using the .dt accessor
+    df = df.copy()
+    df[date_col] = pd.to_datetime(df[date_col])
     df["month"] = df[date_col].dt.month
     df["dayofweek"] = df[date_col].dt.dayofweek
     return df
