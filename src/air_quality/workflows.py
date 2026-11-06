@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 
 from sklearn.linear_model import LinearRegression
+from xgboost import XGBRegressor
 
 from air_quality import data, evaluation, features, selection
 
@@ -127,8 +128,9 @@ def run_advanced(config: AdvancedPipelineConfig | None = None) -> dict:
 
     candidate_cols = features.feature_columns(enriched)
     selected = selection.select_features_rfe(LinearRegression(), enriched, candidate_cols, n_features_to_select=config.n_features)
-    
-    results = evaluation.evaluate_group_cv(LinearRegression(), enriched, selected)
+
+    model = XGBRegressor(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42)
+    results = evaluation.evaluate_group_cv(model, enriched, selected)
     results["selected_features"] = selected
     return results
     
