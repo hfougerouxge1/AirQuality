@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from sklearn.linear_model import LinearRegression
 
-from air_quality import data, evaluation, features
+from air_quality import data, evaluation, features, selection
 
 DEFAULT_COLUMNS = [
     "city",
@@ -82,8 +82,9 @@ class AdvancedPipelineConfig:
     cities: list[str] = field(
         default_factory=lambda: ["Kampala", "Nairobi", "Lagos", "Bujumbura"]
     )
-    columns: list[str] = field(default_factory=lambda: list(DEFAULT_COLUMNS))
+    columns: list[str] | None = None
     missing_threshold: float = 0.7
+    n_features: int = 8
 
 
 def run_advanced(config: AdvancedPipelineConfig | None = None) -> dict:
@@ -105,3 +106,29 @@ def run_advanced(config: AdvancedPipelineConfig | None = None) -> dict:
     - dict of metrics — the exact shape depends on which modules you have added
     """
     # TODO: build this up module by module, following content/session3/'s pages
+    config = config or AdvancedPipelineConfig()
+    train_df, _ = data.load_datasets()
+    columns = config.columns
+    if columns is None:
+        non_satellite = {
+            "id", "site_id", "site_latitude", "site_longitude", "country",
+            "city", "date", "hour", "pm2_5",
+        }
+        satellite_columns = [c for c in train_df.columns if c not in non_satellite]
+        columns = ["city", "date", "hour", "pm2_5"] + satellite_columns
+    
+    scoped = data.restrict_to_scope(train_df, config.cities, columns)
+
+    sparse = data.columns_above_missing_threshold(scoped, threshold=config.missing_threshold)
+    cleaned = data.drop_columns(scoped, sparse)
+    to_fill = cleaned.columns[cleaned.isna().any()].tolist()
+    filled = data.fill_missing_by_city(cleaned, to_fill)
+    enriched = features.add_temporal_features(filled)    
+
+    candidate_cols = features.feature_columns(enriched)
+    selected = selection.select_features_rfe(LinearRegression(), enriched, candidate_cols, n_features_to_select=config.n_features)
+    
+    results = evaluation.evaluate_group_cv(LinearRegression(), enriched, selected)
+    results["selected_features"] = selected
+    return results
+    
