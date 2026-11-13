@@ -2,10 +2,15 @@
 
 from dataclasses import dataclass, field
 
+import numpy as np
+from sklearn.feature_selection import RFE
 from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import GroupKFold, cross_validate
+from sklearn.pipeline import Pipeline
 from xgboost import XGBRegressor
 
 from air_quality import data, evaluation, features, selection
+from air_quality.transformers import AirQualityCleaner
 
 DEFAULT_COLUMNS = [
     "city",
@@ -118,19 +123,51 @@ def run_advanced(config: AdvancedPipelineConfig | None = None) -> dict:
         satellite_columns = [c for c in train_df.columns if c not in non_satellite]
         columns = ["city", "date", "hour", "pm2_5"] + satellite_columns
     
+    # --- Previous run_advanced (Modules 2-5): kept for reference ---
+    # scoped = data.restrict_to_scope(train_df, config.cities, columns)
+    #
+    # sparse = data.columns_above_missing_threshold(scoped, threshold=config.missing_threshold)
+    # cleaned = data.drop_columns(scoped, sparse)
+    # to_fill = cleaned.columns[cleaned.isna().any()].tolist()
+    # filled = data.fill_missing_by_city(cleaned, to_fill)
+    # enriched = features.add_temporal_features(filled)
+    #
+    # candidate_cols = features.feature_columns(enriched)
+    # selected = selection.select_features_rfe(LinearRegression(), enriched, candidate_cols, n_features_to_select=config.n_features)
+    #
+    # model = XGBRegressor(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42)
+    # results = evaluation.evaluate_group_cv(model, enriched, selected)
+    # results["selected_features"] = selected
+    # return results
+
+    # --- Module 7: one Pipeline (AirQualityCleaner -> RFE -> model) evaluated with GroupKFold ---
     scoped = data.restrict_to_scope(train_df, config.cities, columns)
+    scoped = scoped.sort_values(["city", "date"]).reset_index(drop=True)
+    enriched = features.add_temporal_features(scoped)
+    X = enriched.drop(columns="pm2_5")
+    y = enriched["pm2_5"]
 
-    sparse = data.columns_above_missing_threshold(scoped, threshold=config.missing_threshold)
-    cleaned = data.drop_columns(scoped, sparse)
-    to_fill = cleaned.columns[cleaned.isna().any()].tolist()
-    filled = data.fill_missing_by_city(cleaned, to_fill)
-    enriched = features.add_temporal_features(filled)    
+    pipe = Pipeline([
+        ("cleaner", AirQualityCleaner(missing_threshold=0.6)),
+        ("rfe", RFE(LinearRegression(), n_features_to_select=config.n_features)),
+        ("model", XGBRegressor(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42)),
+    ])
 
-    candidate_cols = features.feature_columns(enriched)
-    selected = selection.select_features_rfe(LinearRegression(), enriched, candidate_cols, n_features_to_select=config.n_features)
+    cv = GroupKFold(n_splits=X["city"].nunique())
+    scores = cross_validate(
+        pipe, X, y, groups=X["city"], cv=cv,
+        scoring={"rmse": "neg_root_mean_squared_error", "mae": "neg_mean_absolute_error", "r2": "r2"},
+    )
+    test_groups = [X["city"].iloc[test].iloc[0] for _, test in cv.split(X, y, groups=X["city"])]
 
-    model = XGBRegressor(n_estimators=100, max_depth=3, learning_rate=0.05, random_state=42)
-    results = evaluation.evaluate_group_cv(model, enriched, selected)
-    results["selected_features"] = selected
+    folds = [
+        {"test_group": g, "rmse": -r, "mae": -m, "r2": float(s)}
+        for g, r, m, s in zip(test_groups, scores["test_rmse"], scores["test_mae"], scores["test_r2"])
+    ]
+    results = {"folds": folds}
+    for name in ["rmse", "mae", "r2"]:
+        values = [f[name] for f in folds]
+        results[f"{name}_mean"] = float(np.mean(values))
+        results[f"{name}_std"] = float(np.std(values))
     return results
     
